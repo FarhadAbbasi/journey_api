@@ -26,11 +26,19 @@ def get_store():
 
         class RedisStore:
             async def get(self, key: str) -> Optional[dict]:
-                raw = await r.get(key)
-                return json.loads(raw) if raw else None
+                try:
+                    raw = await r.get(key)
+                    return json.loads(raw) if raw else None
+                except Exception:
+                    # If Redis is unreachable at runtime, behave like empty store.
+                    return None
 
             async def set(self, key: str, value: dict) -> None:
-                await r.set(key, json.dumps(value), ex=STATE_TTL_SECONDS)
+                try:
+                    await r.set(key, json.dumps(value), ex=STATE_TTL_SECONDS)
+                except Exception:
+                    # If Redis is unreachable at runtime, drop writes.
+                    return None
 
         return RedisStore()
     except Exception:
