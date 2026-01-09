@@ -147,16 +147,20 @@ async def chat(req: ChatRequest):
     messages.extend(_trim_history(req.history, max_messages=6))
     messages.append({"role": "user", "content": req.message})
 
-    # Call GPU serverless
-    try:
-        out = await infer_chat(messages=messages, max_tokens=512, temperature=0.7)
-    except RunPodError as e:
-        raise HTTPException(status_code=502, detail=f"RunPod error: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Inference call failed: {e}")
+    # # Call GPU serverless
+    # try:
+    #     out = await infer_chat(messages=messages, max_tokens=512, temperature=0.7)
+    # except RunPodError as e:
+    #     raise HTTPException(status_code=502, detail=f"RunPod error: {e}")
+    # except Exception as e:
+    #     raise HTTPException(status_code=502, detail=f"Inference call failed: {e}")
 
-    raw_text = out.get("raw_text") or out.get("text") or out.get("output") or ""
-    assistant_message, signals_raw = _parse_json_from_model(raw_text)
+    # raw_text = out.get("raw_text") or out.get("text") or out.get("output") or ""
+    # assistant_message, signals_raw = _parse_json_from_model(raw_text)
+
+    # TEMPORARILY DISABLED: return user's message directly (to isolate CPU API behavior)
+    assistant_message = req.message
+    signals_raw: Dict[str, Any] = {}
 
     # Normalize + update state
     clean_signals = normalize_signals(cfg, signals_raw if isinstance(signals_raw, dict) else {})
