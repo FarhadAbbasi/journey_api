@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import json
 import ast
+import asyncio
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -16,9 +17,11 @@ from .assessment import (
     normalize_signals,
     update_user_state,
     assess_stage,
+    config_hash,
 )
 from .state_store import get_store
 from .runpod_client import infer_chat, RunPodError
+from .supabase_store import get_supabase_store, safe_persist
 
 app = FastAPI(title="Journey CPU API", version="0.1.0")
 
@@ -32,6 +35,7 @@ app.add_middleware(
 
 cfg = load_assessment_config(ASSESSMENT_CONFIG_JSON)
 store = get_store()
+sb = get_supabase_store()
 
 def _parse_json_from_model(text: str):
     """Robust JSON extraction from model output (derived from your notebook/script approach)."""
@@ -143,9 +147,26 @@ async def chat(req: ChatRequest):
     # Internal context that the model must NOT mention (keep minimal)
     messages.append({"role": "system", "content": sys_prompt})
 
-    # Add trimmed history if provided
-    messages.extend(_trim_history(req.history, max_messages=6))
+    # Add trimmed history if provided; else load from Supabase (if configured)
+    if req.history:
+        messages.extend(_trim_history(req.history, max_messages=6))
+    elif sb:
+        try:
+            messages.extend(await sb.load_recent_conversation(req.user_id, limit=6))
+        except Exception:
+            pass
     messages.append({"role": "user", "content": req.message})
+
+    # If state is missing (e.g., Redis disabled), try restoring latest signals snapshot from Supabase
+    if sb and not state.get("signals"):
+        try:
+            snap = await sb.load_latest_signal_snapshot(req.user_id)
+            if isinstance(snap, dict):
+                restored = {k: v for k, v in snap.items() if v is not None}
+                if restored:
+                    state["signals"] = restored
+        except Exception:
+            pass
 
     # Call GPU serverless
     try:
@@ -172,6 +193,23 @@ async def chat(req: ChatRequest):
 
     # Compute latest assessment for response
     probs, conf, scores, coverage = assess_stage(cfg, state.get("signals", {}))
+
+    # Persist conversation + signals timeline to Supabase (optional, never blocks response)
+    if sb:
+        asyncio.create_task(safe_persist(
+            sb,
+            user_id=req.user_id,
+            user_message=req.message,
+            assistant_message=assistant_message,
+            signals=clean_signals,
+            stage_probs=probs,
+            confidence=conf,
+            coverage=coverage,
+            config_version=cfg.get("version", "unknown"),
+            config_hash=config_hash(cfg),
+            model_id=None,
+            request_id=None,
+        ))
     return ChatResponse(
         assistant_message=assistant_message,
         stage_probs=probs,
