@@ -9,6 +9,7 @@ import httpx
 SUPABASE_URL = (os.getenv("SUPABASE_URL", "") or "").strip().rstrip("/")
 SUPABASE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY", "") or os.getenv("SUPABASE_KEY", "") or "").strip()
 SUPABASE_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_TIMEOUT_SECONDS", "10"))
+SUPABASE_DEBUG = (os.getenv("SUPABASE_DEBUG", "false") or "").strip().lower() == "true"
 
 SUPABASE_CONVERSATIONS_TABLE = (os.getenv("SUPABASE_CONVERSATIONS_TABLE", "") or "journey_conversations").strip()
 SUPABASE_SIGNAL_SNAPSHOTS_TABLE = (os.getenv("SUPABASE_SIGNAL_SNAPSHOTS_TABLE", "") or "journey_signal_snapshots").strip()
@@ -136,6 +137,10 @@ def get_supabase_store() -> Optional[SupabaseStore]:
     try:
         return SupabaseStore()
     except Exception:
+        if SUPABASE_DEBUG:
+            import traceback
+            print("[supabase] failed to initialize store")
+            traceback.print_exc()
         return None
 
 
@@ -148,6 +153,10 @@ async def safe_persist(store: Optional[SupabaseStore], **kwargs) -> None:
     try:
         await store.persist_turn(**kwargs)
     except Exception:
+        if SUPABASE_DEBUG:
+            import traceback
+            print("[supabase] persist_turn failed")
+            traceback.print_exc()
         return
 
 
